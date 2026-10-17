@@ -46,16 +46,25 @@ public class FirebasePushNotificationService {
         try {
             InputStream is = null;
 
-            // 1. Verificar variable de entorno FIREBASE_CONFIG_PATH o GOOGLE_APPLICATION_CREDENTIALS
-            String envPath = System.getenv("FIREBASE_CONFIG_PATH");
-            if (envPath == null || envPath.isBlank()) {
-                envPath = System.getenv("GOOGLE_APPLICATION_CREDENTIALS");
+            // 0. Verificar variable de entorno directa FIREBASE_CREDENTIALS_JSON
+            String envJson = System.getenv("FIREBASE_CREDENTIALS_JSON");
+            if (envJson != null && envJson.trim().startsWith("{")) {
+                is = new java.io.ByteArrayInputStream(envJson.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                log.info("✅ Cargando credenciales de Firebase desde variable FIREBASE_CREDENTIALS_JSON");
             }
-            if (envPath != null && !envPath.isBlank()) {
-                java.io.File envFile = new java.io.File(envPath);
-                if (envFile.exists()) {
-                    is = new java.io.FileInputStream(envFile);
-                    log.info("✅ Cargando credenciales de Firebase desde variable de entorno: {}", envPath);
+
+            // 1. Verificar variable de entorno FIREBASE_CONFIG_PATH o GOOGLE_APPLICATION_CREDENTIALS
+            if (is == null) {
+                String envPath = System.getenv("FIREBASE_CONFIG_PATH");
+                if (envPath == null || envPath.isBlank()) {
+                    envPath = System.getenv("GOOGLE_APPLICATION_CREDENTIALS");
+                }
+                if (envPath != null && !envPath.isBlank()) {
+                    java.io.File envFile = new java.io.File(envPath);
+                    if (envFile.exists()) {
+                        is = new java.io.FileInputStream(envFile);
+                        log.info("✅ Cargando credenciales de Firebase desde variable de entorno: {}", envPath);
+                    }
                 }
             }
 
@@ -81,13 +90,14 @@ public class FirebasePushNotificationService {
                 try (InputStream stream = is) {
                     this.credentials = GoogleCredentials.fromStream(stream)
                             .createScoped(Collections.singletonList(MESSAGING_SCOPE));
+                    this.credentials.refresh();
                     log.info("✅ Firebase GoogleCredentials inicializado correctamente para bomberos-scz-flotas");
                 }
             } else {
                 log.warn("⚠️ Credenciales de Firebase no configuradas (se debe rotar y ubicar en ruta externa segura). Modo de contingencia activo.");
             }
         } catch (Exception e) {
-            log.warn("⚠️ No se pudieron cargar credenciales de Firebase (posiblemente inhabilitadas o pendientes de rotación): {}. El backend continuará operando normalmente.", e.getMessage());
+            log.warn("⚠️ No se pudieron cargar credenciales de Firebase: {}. El backend continuará operando normalmente.", e.getMessage());
         }
 
         // Cargar tokens persistidos en disco o pre-cargar token activo del bombero
@@ -167,7 +177,11 @@ public class FirebasePushNotificationService {
                 inicializarFirebaseCredentials();
             }
             if (credentials != null) {
-                credentials.refreshIfExpired();
+                if (credentials.getAccessToken() == null) {
+                    credentials.refresh();
+                } else {
+                    credentials.refreshIfExpired();
+                }
             }
             String accessToken = (credentials != null && credentials.getAccessToken() != null)
                     ? credentials.getAccessToken().getTokenValue()
