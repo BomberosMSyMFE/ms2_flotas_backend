@@ -1,0 +1,95 @@
+package bo.gob.bomberos.flota.application.services;
+
+import bo.gob.bomberos.flota.domain.model.*;
+import bo.gob.bomberos.flota.domain.ports.in.ConsultarFlotaInboundPort;
+import bo.gob.bomberos.flota.domain.ports.in.LiberarCamionInboundPort;
+import bo.gob.bomberos.flota.domain.ports.in.ReservarCamionInboundPort;
+import bo.gob.bomberos.flota.domain.ports.out.EventosFlotaOutboundPort;
+import bo.gob.bomberos.flota.domain.ports.out.FlotaPostGisOutboundPort;
+
+import java.time.Instant;
+import java.util.Comparator;
+import java.util.List;
+import java.util.UUID;
+
+/**
+ * Servicio de Aplicación: Orquesta la reserva atómica SAGA, compensación y consulta de flota.
+ */
+public class GestionFlotaService implements ReservarCamionInboundPort, LiberarCamionInboundPort, ConsultarFlotaInboundPort {
+
+    private final FlotaPostGisOutboundPort flotaRepository;
+    private final EventosFlotaOutboundPort eventPublisher;
+
+    public GestionFlotaService(FlotaPostGisOutboundPort flotaRepository, EventosFlotaOutboundPort eventPublisher) {
+        this.flotaRepository = flotaRepository;
+        this.eventPublisher = eventPublisher;
+    }
+
+    @Override
+    public ReservaSaga reservarCamionOptimo(String incidenteId, String tipoFuego, double lat, double lon, int litrosMinimos) {
+        CoordenadaGeografica focoIncidente = new CoordenadaGeografica(lat, lon);
+
+        // 1. Buscar unidades en radio de 25 km mediante PostGIS
+        List<CamionUnidad> unidadesCercanas = flotaRepository.encontrarCamionesCercanos(lat, lon, 25.0);
+
+        // 2. Filtrar por disponibilidad y capacidad mínima (con fallback a la unidad disponible más cercana)
+        CamionUnidad candidatoOptimo = unidadesCercanas.stream()
+                .filter(u -> u.getEstado() == EstadoUnidad.DISPONIBLE)
+                .filter(u -> u.getLitrosAguaActual() >= litrosMinimos)
+                .min(Comparator.comparingDouble(u -> u.getPosicion().distanciaKmHacia(focoIncidente)))
+                .or(() -> unidadesCercanas.stream()
+                        .filter(u -> u.getEstado() == EstadoUnidad.DISPONIBLE)
+                        .min(Comparator.comparingDouble(u -> u.getPosicion().distanciaKmHacia(focoIncidente)))
+                )
+                .orElseThrow(() -> new IllegalStateException(
+                        String.format("No hay camiones en estado DISPONIBLE en un radio de 25 km cerca de [%.4f, %.4f]. Libere alguna unidad antes de reservar.", lat, lon)
+                ));
+
+        // 3. Ejecutar lógica de dominio en el Aggregate Root
+        candidatoOptimo.bloquearParaSaga(incidenteId);
+        flotaRepository.guardar(candidatoOptimo);
+
+        // 4. Calcular métricas operativas
+        double distanciaKm = candidatoOptimo.getPosicion().distanciaKmHacia(focoIncidente);
+        double velocidadPromedioKmH = 40.0;
+        double tiempoEstimadoMinutos = (distanciaKm / velocidadPromedioKmH) * 60.0;
+        String reservaId = "RES-FLOTA-" + UUID.randomUUID().toString().substring(0, 8).toUpperCase();
+
+        ReservaSaga reserva = new ReservaSaga(
+                reservaId,
+                incidenteId,
+                candidatoOptimo.getId(),
+                candidatoOptimo.getPlaca(),
+                candidatoOptimo.getTipo(),
+                candidatoOptimo.getCapacidadMaximaAgua(),
+                candidatoOptimo.getEstado(),
+                Math.round(distanciaKm * 100.0) / 100.0,
+                Math.round(tiempoEstimadoMinutos * 10.0) / 10.0,
+                candidatoOptimo.getEstacionOrigen(),
+                Instant.now()
+        );
+
+        // 5. Emitir evento hacia el bus
+        eventPublisher.publicarEvento("CamionReservadoSagaEvent", candidatoOptimo.getId(), reserva);
+
+        return reserva;
+    }
+
+    @Override
+    public CamionUnidad liberarCamionCompensacion(String incidenteId, String camionId, String motivoCompensacion) {
+        CamionUnidad camion = flotaRepository.buscarPorId(camionId)
+                .orElseThrow(() -> new IllegalArgumentException("Camión no encontrado: " + camionId));
+
+        // Ejecutar acción compensatoria de la SAGA
+        camion.liberarCompensacion();
+        CamionUnidad guardado = flotaRepository.guardar(camion);
+
+        eventPublisher.publicarEvento("CamionLiberadoSagaEvent", camionId, "Compensado por: " + motivoCompensacion);
+        return guardado;
+    }
+
+    @Override
+    public List<CamionUnidad> obtenerUnidadesActivas() {
+        return flotaRepository.listarTodas();
+    }
+}
