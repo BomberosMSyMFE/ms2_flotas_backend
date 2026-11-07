@@ -15,6 +15,9 @@ import org.springframework.web.bind.annotation.*;
 import java.util.List;
 import java.util.stream.Collectors;
 
+import bo.gob.bomberos.flota.application.services.FirebasePushNotificationService;
+import java.util.Map;
+
 /**
  * Adaptador Primario (Driving Adapter): Controlador REST para la SAGA de Despacho,
  * Navegación y consulta de flota activa para el mapa Leaflet.
@@ -28,15 +31,18 @@ public class FlotasRestController {
     private final LiberarCamionInboundPort liberarCamionPort;
     private final CalcularRutaInboundPort calcularRutaPort;
     private final ConsultarFlotaInboundPort consultarFlotaPort;
+    private final FirebasePushNotificationService pushNotificationService;
 
     public FlotasRestController(ReservarCamionInboundPort reservarCamionPort,
                                 LiberarCamionInboundPort liberarCamionPort,
                                 CalcularRutaInboundPort calcularRutaPort,
-                                ConsultarFlotaInboundPort consultarFlotaPort) {
+                                ConsultarFlotaInboundPort consultarFlotaPort,
+                                FirebasePushNotificationService pushNotificationService) {
         this.reservarCamionPort = reservarCamionPort;
         this.liberarCamionPort = liberarCamionPort;
         this.calcularRutaPort = calcularRutaPort;
         this.consultarFlotaPort = consultarFlotaPort;
+        this.pushNotificationService = pushNotificationService;
     }
 
     @PostMapping("/reservar-camion")
@@ -78,4 +84,25 @@ public class FlotasRestController {
                 .collect(Collectors.toList());
         return ResponseEntity.ok(dtos);
     }
+
+    @PostMapping("/push-token")
+    public ResponseEntity<Map<String, Object>> registrarTokenPush(@Valid @RequestBody PushTokenRequestDto request) {
+        pushNotificationService.registrarToken(request.unidadId(), request.token());
+        return ResponseEntity.ok(Map.of(
+                "status", "OK",
+                "mensaje", "Token FCM registrado exitosamente para unidad " + request.unidadId()
+        ));
+    }
+
+    @PostMapping("/despacho-notificar")
+    public ResponseEntity<Map<String, Object>> notificarDespacho(@RequestBody DespachoNotificacionRequestDto request) {
+        Map<String, Object> resultado = pushNotificationService.enviarAlertaDespacho(request);
+        return ResponseEntity.ok(resultado);
+    }
+
+    @GetMapping("/push-tokens")
+    public ResponseEntity<Map<String, String>> listarTokens() {
+        return ResponseEntity.ok(pushNotificationService.listarTokensRegistrados());
+    }
 }
+
