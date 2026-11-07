@@ -72,17 +72,22 @@ public class FirebasePushNotificationService {
         String unidadId = request.getUnidadIdOrDefault().toUpperCase();
         String targetToken = tokensPorUnidad.get(unidadId);
 
-        // Si la unidad solicitada no tiene token, pero hay otros tokens registrados, usar el más reciente para testing
-        if (targetToken == null && !tokensPorUnidad.isEmpty()) {
-            targetToken = tokensPorUnidad.values().iterator().next();
-            log.info("ℹ️ Unidad {} no tiene token específico, usando token activo de bombero: {}...", unidadId, targetToken.substring(0, Math.min(targetToken.length(), 20)));
+        // Recopilar todos los tokens válidos registrados (longitud > 50 para descartar tokens dummy)
+        List<String> tokensAEnviar = new ArrayList<>();
+        if (targetToken != null && targetToken.length() > 50) {
+            tokensAEnviar.add(targetToken);
+        }
+        for (String t : tokensPorUnidad.values()) {
+            if (t != null && t.length() > 50 && !tokensAEnviar.contains(t)) {
+                tokensAEnviar.add(t);
+            }
         }
 
-        if (targetToken == null) {
-            log.warn("⚠️ No hay ningún dispositivo móvil registrado para recibir la notificación push.");
+        if (tokensAEnviar.isEmpty()) {
+            log.warn("⚠️ No hay ningún token FCM válido registrado todavía.");
             return Map.of(
                     "status", "WARNING",
-                    "mensaje", "No hay ningún celular de bombero con notificaciones activadas todavía. Abre la app en el celular y pulsa [Activar Notificaciones].",
+                    "mensaje", "No hay ningún celular con notificaciones activadas todavía. Abre la app en el celular y pulsa [Activar Notificaciones].",
                     "unidadId", unidadId
             );
         }
@@ -138,40 +143,48 @@ public class FirebasePushNotificationService {
                     )
             );
 
-            Map<String, Object> message = new HashMap<>();
-            message.put("token", targetToken);
-            message.put("notification", notification);
-            message.put("data", data);
-            message.put("android", androidConfig);
-            message.put("webpush", webpushConfig);
+            int exitos = 0;
+            List<String> respuestas = new ArrayList<>();
 
-            Map<String, Object> rootPayload = Map.of("message", message);
-            String jsonPayload = objectMapper.writeValueAsString(rootPayload);
+            for (String tok : tokensAEnviar) {
+                Map<String, Object> message = new HashMap<>();
+                message.put("token", tok);
+                message.put("notification", notification);
+                message.put("data", data);
+                message.put("android", androidConfig);
+                message.put("webpush", webpushConfig);
 
-            HttpRequest httpRequest = HttpRequest.newBuilder()
-                    .uri(URI.create(FCM_ENDPOINT))
-                    .header("Authorization", "Bearer " + accessToken)
-                    .header("Content-Type", "application/json; UTF-8")
-                    .POST(HttpRequest.BodyPublishers.ofString(jsonPayload))
-                    .build();
+                Map<String, Object> rootPayload = Map.of("message", message);
+                String jsonPayload = objectMapper.writeValueAsString(rootPayload);
 
-            HttpResponse<String> httpResponse = httpClient.send(httpRequest, HttpResponse.BodyHandlers.ofString());
+                HttpRequest httpRequest = HttpRequest.newBuilder()
+                        .uri(URI.create(FCM_ENDPOINT))
+                        .header("Authorization", "Bearer " + accessToken)
+                        .header("Content-Type", "application/json; UTF-8")
+                        .POST(HttpRequest.BodyPublishers.ofString(jsonPayload))
+                        .build();
 
-            log.info("📡 Respuesta FCM v1: Status={}, Body={}", httpResponse.statusCode(), httpResponse.body());
+                HttpResponse<String> httpResponse = httpClient.send(httpRequest, HttpResponse.BodyHandlers.ofString());
+                log.info("📡 Respuesta FCM v1 para token {}...: Status={}", tok.substring(0, Math.min(tok.length(), 20)), httpResponse.statusCode());
+                if (httpResponse.statusCode() >= 200 && httpResponse.statusCode() < 300) {
+                    exitos++;
+                    respuestas.add(httpResponse.body());
+                }
+            }
 
-            if (httpResponse.statusCode() >= 200 && httpResponse.statusCode() < 300) {
+            if (exitos > 0) {
                 return Map.of(
                         "status", "SUCCESS",
-                        "mensaje", "Notificación Push de Despacho Táctico enviada exitosamente al celular.",
+                        "mensaje", "Notificación Push de Despacho Táctico enviada a " + exitos + " dispositivo(s).",
                         "unidadId", unidadId,
                         "incidenteId", request.getIncidenteIdOrDefault(),
-                        "fcmResponse", httpResponse.body()
+                        "enviados", exitos,
+                        "fcmResponses", respuestas
                 );
             } else {
                 return Map.of(
                         "status", "ERROR_FCM",
-                        "codigoHttp", httpResponse.statusCode(),
-                        "detalle", httpResponse.body()
+                        "mensaje", "No se pudo entregar la notificación a los tokens registrados."
                 );
             }
 
