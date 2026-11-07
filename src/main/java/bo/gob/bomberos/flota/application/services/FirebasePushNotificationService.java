@@ -29,8 +29,10 @@ public class FirebasePushNotificationService {
     private final HttpClient httpClient;
     private GoogleCredentials credentials;
 
-    // Tokens registrados en memoria por unidad (ej. "B-01" -> "fcm_token_...")
+    // Tokens registrados en memoria por unidad (ej. "B-04" -> "fcm_token_...")
     private final Map<String, String> tokensPorUnidad = new ConcurrentHashMap<>();
+    private static final String TOKENS_FILE = "fcm_tokens_cache.json";
+    private static final String DEFAULT_BOMBERO_TOKEN = "eHnP5Qf5WEopa6qMb-3tT0:APA91bGyfoIXF1AfwLJDWQSSGDUQABb-GMIBViqsAJOSxld-3LD0JPvJY-96XcFFcki3eFSE_R-LBmfpmCSMfj0BjOGvsnR9HduxlzPKYQrG5EkAhSktAiI";
 
     public FirebasePushNotificationService(ObjectMapper objectMapper) {
         this.objectMapper = objectMapper;
@@ -55,12 +57,48 @@ public class FirebasePushNotificationService {
         } catch (Exception e) {
             log.error("❌ Error inicializando GoogleCredentials para FCM: {}", e.getMessage(), e);
         }
+
+        // Cargar tokens persistidos en disco o pre-cargar token activo del bombero
+        cargarTokensDeDisco();
+    }
+
+    private synchronized void cargarTokensDeDisco() {
+        try {
+            java.io.File file = new java.io.File(TOKENS_FILE);
+            if (file.exists()) {
+                Map<String, String> loaded = objectMapper.readValue(file, Map.class);
+                if (loaded != null) {
+                    tokensPorUnidad.putAll(loaded);
+                    log.info("📂 {} tokens FCM cargados desde {}", tokensPorUnidad.size(), TOKENS_FILE);
+                }
+            }
+        } catch (Exception e) {
+            log.warn("No se pudo cargar tokens desde disco: {}", e.getMessage());
+        }
+
+        // Garantizar que el dispositivo móvil activo del bombero siempre esté pre-registrado
+        if (tokensPorUnidad.isEmpty()) {
+            tokensPorUnidad.put("B-04", DEFAULT_BOMBERO_TOKEN);
+            tokensPorUnidad.put("B-01", DEFAULT_BOMBERO_TOKEN);
+            guardarTokensEnDisco();
+            log.info("📲 Token móvil de bombero activo pre-configurado para B-04 y B-01");
+        }
+    }
+
+    private synchronized void guardarTokensEnDisco() {
+        try {
+            java.io.File file = new java.io.File(TOKENS_FILE);
+            objectMapper.writeValue(file, tokensPorUnidad);
+        } catch (Exception e) {
+            log.warn("No se pudo guardar tokens en disco: {}", e.getMessage());
+        }
     }
 
     public void registrarToken(String unidadId, String token) {
-        if (unidadId != null && token != null) {
+        if (unidadId != null && token != null && token.length() > 50) {
             tokensPorUnidad.put(unidadId.toUpperCase(), token);
-            log.info("📲 Token Push registrado para Unidad [{}]: {}...", unidadId, token.substring(0, Math.min(token.length(), 25)));
+            guardarTokensEnDisco();
+            log.info("📲 Token Push registrado y persistido para Unidad [{}]: {}...", unidadId, token.substring(0, Math.min(token.length(), 25)));
         }
     }
 
@@ -111,6 +149,8 @@ public class FirebasePushNotificationService {
             String cuerpo = "Unidad " + unidadId + " despachada a " + request.getUbicacionOrDefault() + " [" + request.getPrioridadOrDefault() + "]";
 
             Map<String, Object> data = new HashMap<>();
+            data.put("title", titulo);
+            data.put("body", cuerpo);
             data.put("incidenteId", request.getIncidenteIdOrDefault());
             data.put("tipoIncidente", request.getTipoIncidenteOrDefault());
             data.put("ubicacion", request.getUbicacionOrDefault());
@@ -139,6 +179,9 @@ public class FirebasePushNotificationService {
                     "notification", Map.of(
                             "icon", "/icon-192.png",
                             "badge", "/icon-192.png",
+                            "vibrate", List.of(500, 250, 500, 250, 1000),
+                            "renotify", true,
+                            "tag", "despacho-" + System.currentTimeMillis(),
                             "requireInteraction", true
                     )
             );
