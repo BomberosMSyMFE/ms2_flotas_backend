@@ -71,6 +71,26 @@ public class CamionUnidad {
     }
 
     /**
+     * Regla de Negocio: Culminación exitosa de la SAGA. El despacho queda confirmado y la unidad pasa a EN_TRANSITO.
+     */
+    public void confirmarDespacho() {
+        if (this.estado == EstadoUnidad.BLOQUEADO_SAGA) {
+            this.estado = EstadoUnidad.EN_TRANSITO;
+            this.ultimaActualizacion = Instant.now();
+        }
+    }
+
+    /**
+     * Regla de Negocio: Conclusión de la atención del siniestro. La unidad queda disponible nuevamente.
+     */
+    public void concluirMision() {
+        this.estado = EstadoUnidad.DISPONIBLE;
+        this.incidenteAsignadoId = null;
+        this.velocidadKmH = 0.0;
+        this.ultimaActualizacion = Instant.now();
+    }
+
+    /**
      * Regla de Negocio: Ingesta periódica de telemetría desde sensores o cabina.
      */
     public void actualizarTelemetria(CoordenadaGeografica nuevaPosicion, double velocidad, double rumbo,
@@ -80,7 +100,14 @@ public class CamionUnidad {
         this.rumboGrados = rumbo;
         this.litrosAguaActual = Math.min(litros, this.capacidadMaximaAgua);
         this.combustiblePorcentaje = Math.max(0, Math.min(100, combustible));
-        if (nuevoEstado != null && this.estado != EstadoUnidad.BLOQUEADO_SAGA) {
+
+        // Si la unidad estaba en reserva transaccional (BLOQUEADO_SAGA) y la telemetría reporta avance o misión,
+        // evoluciona de forma natural a la fase operativa (EN_TRANSITO o EN_ESCENA)
+        if (this.estado == EstadoUnidad.BLOQUEADO_SAGA) {
+            if (nuevoEstado == EstadoUnidad.EN_TRANSITO || nuevoEstado == EstadoUnidad.EN_ESCENA || velocidad > 0) {
+                this.estado = (nuevoEstado != null && nuevoEstado != EstadoUnidad.DISPONIBLE) ? nuevoEstado : EstadoUnidad.EN_TRANSITO;
+            }
+        } else if (nuevoEstado != null) {
             this.estado = nuevoEstado;
         }
         this.ultimaActualizacion = Instant.now();

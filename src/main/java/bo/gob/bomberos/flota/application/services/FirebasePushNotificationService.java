@@ -78,8 +78,8 @@ public class FirebasePushNotificationService {
             }
 
             if (is != null) {
-                try (is) {
-                    this.credentials = GoogleCredentials.fromStream(is)
+                try (InputStream stream = is) {
+                    this.credentials = GoogleCredentials.fromStream(stream)
                             .createScoped(Collections.singletonList(MESSAGING_SCOPE));
                     log.info("✅ Firebase GoogleCredentials inicializado correctamente para bomberos-scz-flotas");
                 }

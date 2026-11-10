@@ -61,4 +61,50 @@ class CamionUnidadTest {
 
         assertTrue(dist > 1.0 && dist < 3.0, "La distancia debe estar entre 1 y 3 km");
     }
+
+    @Test
+    @DisplayName("Debe confirmar despacho y pasar de BLOQUEADO_SAGA a EN_TRANSITO")
+    void debeConfirmarDespachoYPasarAEnTransito() {
+        CamionUnidad camion = new CamionUnidad(
+                "B-04", "3482-LKP", TipoUnidad.CISTERNA_PESADA, EstadoUnidad.DISPONIBLE,
+                new CoordenadaGeografica(-17.7780, -63.1795), 10000, 10000, 90, "Estación Norte"
+        );
+        camion.bloquearParaSaga("INC-2026-7890");
+        assertEquals(EstadoUnidad.BLOQUEADO_SAGA, camion.getEstado());
+
+        camion.confirmarDespacho();
+        assertEquals(EstadoUnidad.EN_TRANSITO, camion.getEstado());
+        assertEquals("INC-2026-7890", camion.getIncidenteAsignadoId());
+    }
+
+    @Test
+    @DisplayName("Debe evolucionar a EN_TRANSITO cuando el camión bloqueado por SAGA inicia telemetría en movimiento")
+    void debeEvolucionarDeBloqueadoSagaAEnTransitoAlIniciarMarcha() {
+        CamionUnidad camion = new CamionUnidad(
+                "B-04", "3482-LKP", TipoUnidad.CISTERNA_PESADA, EstadoUnidad.DISPONIBLE,
+                new CoordenadaGeografica(-17.7780, -63.1795), 10000, 10000, 90, "Estación Norte"
+        );
+        camion.bloquearParaSaga("INC-2026-7890");
+
+        // El camión inicia marcha hacia el siniestro a 45 km/h
+        camion.actualizarTelemetria(new CoordenadaGeografica(-17.7790, -63.1800), 45.0, 120.0, 9800, 88, EstadoUnidad.EN_TRANSITO);
+
+        assertEquals(EstadoUnidad.EN_TRANSITO, camion.getEstado());
+    }
+
+    @Test
+    @DisplayName("Debe concluir misión y volver a DISPONIBLE liberando el incidente")
+    void debeConcluirMisionYVolverADisponible() {
+        CamionUnidad camion = new CamionUnidad(
+                "B-04", "3482-LKP", TipoUnidad.CISTERNA_PESADA, EstadoUnidad.DISPONIBLE,
+                new CoordenadaGeografica(-17.7780, -63.1795), 10000, 10000, 90, "Estación Norte"
+        );
+        camion.bloquearParaSaga("INC-2026-7890");
+        camion.confirmarDespacho();
+        assertEquals(EstadoUnidad.EN_TRANSITO, camion.getEstado());
+
+        camion.concluirMision();
+        assertEquals(EstadoUnidad.DISPONIBLE, camion.getEstado());
+        assertNull(camion.getIncidenteAsignadoId());
+    }
 }
