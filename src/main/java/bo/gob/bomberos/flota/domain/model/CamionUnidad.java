@@ -109,6 +109,9 @@ public class CamionUnidad {
             }
         } else if (nuevoEstado != null) {
             this.estado = nuevoEstado;
+            if (nuevoEstado == EstadoUnidad.DISPONIBLE) {
+                this.incidenteAsignadoId = null;
+            }
         }
         this.ultimaActualizacion = Instant.now();
     }

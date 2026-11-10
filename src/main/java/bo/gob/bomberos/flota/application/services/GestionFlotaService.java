@@ -10,6 +10,7 @@ import bo.gob.bomberos.flota.domain.ports.out.FlotaPostGisOutboundPort;
 import java.time.Instant;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 /**
@@ -27,23 +28,35 @@ public class GestionFlotaService implements ReservarCamionInboundPort, LiberarCa
 
     @Override
     public ReservaSaga reservarCamionOptimo(String incidenteId, String tipoFuego, double lat, double lon, int litrosMinimos) {
+        return reservarCamionOptimo(incidenteId, tipoFuego, lat, lon, litrosMinimos, null);
+    }
+
+    @Override
+    public ReservaSaga reservarCamionOptimo(String incidenteId, String tipoFuego, double lat, double lon, int litrosMinimos, String camionIdSolicitado) {
         CoordenadaGeografica focoIncidente = new CoordenadaGeografica(lat, lon);
 
-        // 1. Buscar unidades en radio de 25 km mediante PostGIS
-        List<CamionUnidad> unidadesCercanas = flotaRepository.encontrarCamionesCercanos(lat, lon, 25.0);
+        // Si el orquestador solicita una unidad específica (ej. "B-01"), priorizarla si está DISPONIBLE
+        Optional<CamionUnidad> camionEspecifico = Optional.empty();
+        if (camionIdSolicitado != null && !camionIdSolicitado.isBlank()) {
+            camionEspecifico = flotaRepository.buscarPorId(camionIdSolicitado.trim().toUpperCase())
+                    .filter(u -> u.getEstado() == EstadoUnidad.DISPONIBLE);
+        }
 
-        // 2. Filtrar por disponibilidad y capacidad mínima (con fallback a la unidad disponible más cercana)
-        CamionUnidad candidatoOptimo = unidadesCercanas.stream()
-                .filter(u -> u.getEstado() == EstadoUnidad.DISPONIBLE)
-                .filter(u -> u.getLitrosAguaActual() >= litrosMinimos)
-                .min(Comparator.comparingDouble(u -> u.getPosicion().distanciaKmHacia(focoIncidente)))
-                .or(() -> unidadesCercanas.stream()
-                        .filter(u -> u.getEstado() == EstadoUnidad.DISPONIBLE)
-                        .min(Comparator.comparingDouble(u -> u.getPosicion().distanciaKmHacia(focoIncidente)))
-                )
-                .orElseThrow(() -> new IllegalStateException(
-                        String.format("No hay camiones en estado DISPONIBLE en un radio de 25 km cerca de [%.4f, %.4f]. Libere alguna unidad antes de reservar.", lat, lon)
-                ));
+        // Buscar unidad idónea (solicitada o por proximidad espacial PostGIS)
+        CamionUnidad candidatoOptimo = camionEspecifico.orElseGet(() -> {
+            List<CamionUnidad> unidadesCercanas = flotaRepository.encontrarCamionesCercanos(lat, lon, 25.0);
+            return unidadesCercanas.stream()
+                    .filter(u -> u.getEstado() == EstadoUnidad.DISPONIBLE)
+                    .filter(u -> u.getLitrosAguaActual() >= litrosMinimos)
+                    .min(Comparator.comparingDouble(u -> u.getPosicion().distanciaKmHacia(focoIncidente)))
+                    .or(() -> unidadesCercanas.stream()
+                            .filter(u -> u.getEstado() == EstadoUnidad.DISPONIBLE)
+                            .min(Comparator.comparingDouble(u -> u.getPosicion().distanciaKmHacia(focoIncidente)))
+                    )
+                    .orElseThrow(() -> new IllegalStateException(
+                            String.format("No hay camiones en estado DISPONIBLE en un radio de 25 km cerca de [%.4f, %.4f]. Libere alguna unidad antes de reservar.", lat, lon)
+                    ));
+        });
 
         // 3. Ejecutar lógica de dominio en el Aggregate Root
         candidatoOptimo.bloquearParaSaga(incidenteId);

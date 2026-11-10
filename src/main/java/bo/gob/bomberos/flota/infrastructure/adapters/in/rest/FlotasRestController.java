@@ -49,10 +49,11 @@ public class FlotasRestController {
     public ResponseEntity<ReservaCamionResponseDto> reservarCamion(@Valid @RequestBody ReservaCamionRequestDto request) {
         ReservaSaga reserva = reservarCamionPort.reservarCamionOptimo(
                 request.incidenteId(),
-                request.tipoFuego(),
+                request.getTipoFuegoOrDefault(),
                 request.getLatitudOrDefault(),
                 request.getLongitudOrDefault(),
-                request.getLitrosMinimosOrDefault()
+                request.getLitrosMinimosOrDefault(),
+                request.camionId()
         );
         return ResponseEntity.ok(ReservaCamionResponseDto.fromDomain(reserva));
     }

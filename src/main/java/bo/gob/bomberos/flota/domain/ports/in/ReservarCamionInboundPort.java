@@ -6,5 +6,9 @@ import bo.gob.bomberos.flota.domain.model.ReservaSaga;
  * Puerto de Entrada: Caso de uso de reserva de unidad para la transacción SAGA.
  */
 public interface ReservarCamionInboundPort {
-    ReservaSaga reservarCamionOptimo(String incidenteId, String tipoFuego, double lat, double lon, int litrosMinimos);
+    default ReservaSaga reservarCamionOptimo(String incidenteId, String tipoFuego, double lat, double lon, int litrosMinimos) {
+        return reservarCamionOptimo(incidenteId, tipoFuego, lat, lon, litrosMinimos, null);
+    }
+
+    ReservaSaga reservarCamionOptimo(String incidenteId, String tipoFuego, double lat, double lon, int litrosMinimos, String camionIdSolicitado);
 }
