@@ -53,9 +53,25 @@ public class FlotasRestController {
                 request.getLatitudOrDefault(),
                 request.getLongitudOrDefault(),
                 request.getLitrosMinimosOrDefault(),
-                request.camionId()
+                request.camionId(),
+                request.direccion(),
+                request.cuadrante()
         );
         return ResponseEntity.ok(ReservaCamionResponseDto.fromDomain(reserva));
+    }
+
+    @GetMapping("/incidentes/activos")
+    public ResponseEntity<List<Map<String, Object>>> listarIncidentesActivos() {
+        return ResponseEntity.ok(consultarFlotaPort.obtenerIncidentesActivos());
+    }
+
+    @GetMapping("/camiones/{camionId}/incidente")
+    public ResponseEntity<Map<String, Object>> obtenerIncidenteCamion(@PathVariable String camionId) {
+        Map<String, Object> inc = consultarFlotaPort.obtenerIncidenteDeCamion(camionId);
+        if (inc == null) {
+            return ResponseEntity.noContent().build();
+        }
+        return ResponseEntity.ok(inc);
     }
 
     @PostMapping("/liberar-camion")

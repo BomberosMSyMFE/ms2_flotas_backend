@@ -10,5 +10,9 @@ public interface ReservarCamionInboundPort {
         return reservarCamionOptimo(incidenteId, tipoFuego, lat, lon, litrosMinimos, null);
     }
 
-    ReservaSaga reservarCamionOptimo(String incidenteId, String tipoFuego, double lat, double lon, int litrosMinimos, String camionIdSolicitado);
+    default ReservaSaga reservarCamionOptimo(String incidenteId, String tipoFuego, double lat, double lon, int litrosMinimos, String camionIdSolicitado) {
+        return reservarCamionOptimo(incidenteId, tipoFuego, lat, lon, litrosMinimos, camionIdSolicitado, null, null);
+    }
+
+    ReservaSaga reservarCamionOptimo(String incidenteId, String tipoFuego, double lat, double lon, int litrosMinimos, String camionIdSolicitado, String direccion, String cuadrante);
 }

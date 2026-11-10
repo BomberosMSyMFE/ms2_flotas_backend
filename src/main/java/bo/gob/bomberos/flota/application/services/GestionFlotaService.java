@@ -9,9 +9,13 @@ import bo.gob.bomberos.flota.domain.ports.out.FlotaPostGisOutboundPort;
 
 import java.time.Instant;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.stream.Collectors;
 
 /**
  * Servicio de Aplicación: Orquesta la reserva atómica SAGA, compensación y consulta de flota.
@@ -20,6 +24,7 @@ public class GestionFlotaService implements ReservarCamionInboundPort, LiberarCa
 
     private final FlotaPostGisOutboundPort flotaRepository;
     private final EventosFlotaOutboundPort eventPublisher;
+    private final Map<String, Map<String, Object>> incidentesAsignados = new ConcurrentHashMap<>();
 
     public GestionFlotaService(FlotaPostGisOutboundPort flotaRepository, EventosFlotaOutboundPort eventPublisher) {
         this.flotaRepository = flotaRepository;
@@ -28,11 +33,11 @@ public class GestionFlotaService implements ReservarCamionInboundPort, LiberarCa
 
     @Override
     public ReservaSaga reservarCamionOptimo(String incidenteId, String tipoFuego, double lat, double lon, int litrosMinimos) {
-        return reservarCamionOptimo(incidenteId, tipoFuego, lat, lon, litrosMinimos, null);
+        return reservarCamionOptimo(incidenteId, tipoFuego, lat, lon, litrosMinimos, null, null, null);
     }
 
     @Override
-    public ReservaSaga reservarCamionOptimo(String incidenteId, String tipoFuego, double lat, double lon, int litrosMinimos, String camionIdSolicitado) {
+    public ReservaSaga reservarCamionOptimo(String incidenteId, String tipoFuego, double lat, double lon, int litrosMinimos, String camionIdSolicitado, String direccion, String cuadrante) {
         CoordenadaGeografica focoIncidente = new CoordenadaGeografica(lat, lon);
 
         // Si el orquestador solicita una unidad específica (ej. "B-01"), priorizarla si está DISPONIBLE
@@ -61,6 +66,26 @@ public class GestionFlotaService implements ReservarCamionInboundPort, LiberarCa
         // 3. Ejecutar lógica de dominio en el Aggregate Root
         candidatoOptimo.bloquearParaSaga(incidenteId);
         flotaRepository.guardar(candidatoOptimo);
+
+        // Registrar datos completos del incidente asignado por Nataly (SAGA MS-01)
+        Map<String, Object> incInfo = new HashMap<>();
+        incInfo.put("incidenteId", incidenteId);
+        incInfo.put("camionId", candidatoOptimo.getId());
+        incInfo.put("titulo", "Emergencia SAGA: " + (direccion != null ? direccion : (tipoFuego != null ? tipoFuego : "Incendio")));
+        incInfo.put("tipoFuego", tipoFuego != null && !tipoFuego.isBlank() ? tipoFuego : "ESTRUCTURAL");
+        incInfo.put("direccion", direccion != null ? direccion : "Santa Cruz de la Sierra");
+        incInfo.put("ubicacion", direccion != null ? direccion : "Santa Cruz de la Sierra");
+        incInfo.put("cuadrante", cuadrante != null ? cuadrante : "Cuadrante Norte");
+        incInfo.put("latitud", lat);
+        incInfo.put("longitud", lon);
+        incInfo.put("litrosMinimos", litrosMinimos);
+        incInfo.put("prioridad", "CODIGO_ROJO");
+        incInfo.put("estado", "ASIGNADO");
+        incInfo.put("camionSugeridoId", candidatoOptimo.getId());
+        incInfo.put("fechaAsignacion", Instant.now().toString());
+
+        incidentesAsignados.put(candidatoOptimo.getId(), incInfo);
+        incidentesAsignados.put(incidenteId, incInfo);
 
         // 4. Calcular métricas operativas
         double distanciaKm = candidatoOptimo.getPosicion().distanciaKmHacia(focoIncidente);
@@ -97,6 +122,11 @@ public class GestionFlotaService implements ReservarCamionInboundPort, LiberarCa
         camion.liberarCompensacion();
         CamionUnidad guardado = flotaRepository.guardar(camion);
 
+        incidentesAsignados.remove(camionId);
+        if (incidenteId != null) {
+            incidentesAsignados.remove(incidenteId);
+        }
+
         eventPublisher.publicarEvento("CamionLiberadoSagaEvent", camionId, "Compensado por: " + motivoCompensacion);
         return guardado;
     }
@@ -104,5 +134,18 @@ public class GestionFlotaService implements ReservarCamionInboundPort, LiberarCa
     @Override
     public List<CamionUnidad> obtenerUnidadesActivas() {
         return flotaRepository.listarTodas();
+    }
+
+    @Override
+    public List<Map<String, Object>> obtenerIncidentesActivos() {
+        return incidentesAsignados.values().stream()
+                .distinct()
+                .collect(Collectors.toList());
+    }
+
+    @Override
+    public Map<String, Object> obtenerIncidenteDeCamion(String camionId) {
+        if (camionId == null) return null;
+        return incidentesAsignados.get(camionId.trim().toUpperCase());
     }
 }

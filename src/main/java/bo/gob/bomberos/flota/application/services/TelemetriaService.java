@@ -27,7 +27,9 @@ public class TelemetriaService implements TelemetriaInboundPort {
         CamionUnidad camion = flotaRepository.buscarPorId(camionId)
                 .orElseThrow(() -> new IllegalArgumentException("Camión no encontrado: " + camionId));
 
-        CoordenadaGeografica nuevaPos = new CoordenadaGeografica(latitud, longitud);
+        double finalLat = (latitud != 0.0) ? latitud : camion.getPosicion().getLatitud();
+        double finalLon = (longitud != 0.0) ? longitud : camion.getPosicion().getLongitud();
+        CoordenadaGeografica nuevaPos = new CoordenadaGeografica(finalLat, finalLon);
         camion.actualizarTelemetria(nuevaPos, velocidadKmH, rumboGrados, litrosAguaActual, combustiblePorcentaje, estadoOperativo);
 
         flotaRepository.guardar(camion);

@@ -14,6 +14,7 @@ public record CamionUnidadResponseDto(
         int capacidadMaximaAgua,
         int combustiblePorcentaje,
         String estacionOrigen,
+        String incidenteAsignadoId,
         Instant ultimaActualizacion
 ) {
     public static CamionUnidadResponseDto fromDomain(CamionUnidad model) {
@@ -28,6 +29,7 @@ public record CamionUnidadResponseDto(
                 model.getCapacidadMaximaAgua(),
                 model.getCombustiblePorcentaje(),
                 model.getEstacionOrigen(),
+                model.getIncidenteAsignadoId(),
                 model.getUltimaActualizacion()
         );
     }
