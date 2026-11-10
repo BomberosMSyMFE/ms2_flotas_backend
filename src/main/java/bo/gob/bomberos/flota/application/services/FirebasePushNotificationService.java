@@ -44,18 +44,50 @@ public class FirebasePushNotificationService {
     @PostConstruct
     public void inicializarFirebaseCredentials() {
         try {
-            ClassPathResource resource = new ClassPathResource("firebase-adminsdk.json");
-            if (resource.exists()) {
-                try (InputStream is = resource.getInputStream()) {
+            InputStream is = null;
+
+            // 1. Verificar variable de entorno FIREBASE_CONFIG_PATH o GOOGLE_APPLICATION_CREDENTIALS
+            String envPath = System.getenv("FIREBASE_CONFIG_PATH");
+            if (envPath == null || envPath.isBlank()) {
+                envPath = System.getenv("GOOGLE_APPLICATION_CREDENTIALS");
+            }
+            if (envPath != null && !envPath.isBlank()) {
+                java.io.File envFile = new java.io.File(envPath);
+                if (envFile.exists()) {
+                    is = new java.io.FileInputStream(envFile);
+                    log.info("✅ Cargando credenciales de Firebase desde variable de entorno: {}", envPath);
+                }
+            }
+
+            // 2. Verificar archivo local en la raíz de ejecución (ignorado en Git)
+            if (is == null) {
+                java.io.File localFile = new java.io.File("firebase-adminsdk.json");
+                if (localFile.exists()) {
+                    is = new java.io.FileInputStream(localFile);
+                    log.info("✅ Cargando credenciales de Firebase desde archivo local en raíz.");
+                }
+            }
+
+            // 3. Fallback a classpath (si existiera en runtime)
+            if (is == null) {
+                ClassPathResource resource = new ClassPathResource("firebase-adminsdk.json");
+                if (resource.exists()) {
+                    is = resource.getInputStream();
+                    log.info("✅ Cargando credenciales de Firebase desde classpath.");
+                }
+            }
+
+            if (is != null) {
+                try (is) {
                     this.credentials = GoogleCredentials.fromStream(is)
                             .createScoped(Collections.singletonList(MESSAGING_SCOPE));
                     log.info("✅ Firebase GoogleCredentials inicializado correctamente para bomberos-scz-flotas");
                 }
             } else {
-                log.warn("⚠️ Archivo firebase-adminsdk.json no encontrado en classpath.");
+                log.warn("⚠️ Credenciales de Firebase no configuradas (se debe rotar y ubicar en ruta externa segura). Modo de contingencia activo.");
             }
         } catch (Exception e) {
-            log.error("❌ Error inicializando GoogleCredentials para FCM: {}", e.getMessage(), e);
+            log.warn("⚠️ No se pudieron cargar credenciales de Firebase (posiblemente inhabilitadas o pendientes de rotación): {}. El backend continuará operando normalmente.", e.getMessage());
         }
 
         // Cargar tokens persistidos en disco o pre-cargar token activo del bombero

@@ -31,3 +31,12 @@ build/
 
 ### VS Code ###
 .vscode/
+
+### Secrets & Credentials (Google Cloud / Firebase) ###
+*firebase-adminsdk*.json
+*serviceaccount*.json
+*.pem
+*.key
+src/main/resources/firebase-adminsdk*.json
+fcm_tokens_cache.json
+
