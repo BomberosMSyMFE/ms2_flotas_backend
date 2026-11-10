@@ -31,6 +31,38 @@ public class GestionFlotaService implements ReservarCamionInboundPort, LiberarCa
         this.eventPublisher = eventPublisher;
     }
 
+    @jakarta.annotation.PostConstruct
+    public void inicializarIncidentesDesdeBd() {
+        try {
+            List<CamionUnidad> unidades = flotaRepository.listarTodas();
+            for (CamionUnidad c : unidades) {
+                if (c.getIncidenteAsignadoId() != null && !c.getIncidenteAsignadoId().isBlank()
+                        && c.getEstado() != EstadoUnidad.DISPONIBLE) {
+                    Map<String, Object> incInfo = new HashMap<>();
+                    incInfo.put("incidenteId", c.getIncidenteAsignadoId());
+                    incInfo.put("camionId", c.getId());
+                    incInfo.put("titulo", "Emergencia SAGA: Incidente " + c.getIncidenteAsignadoId());
+                    incInfo.put("tipoFuego", "ESTRUCTURAL");
+                    incInfo.put("ubicacion", c.getEstacionOrigen() != null ? c.getEstacionOrigen() : "Santa Cruz de la Sierra");
+                    incInfo.put("direccion", c.getEstacionOrigen());
+                    incInfo.put("cuadrante", "CENTRO");
+                    incInfo.put("latitud", c.getPosicion().getLatitud());
+                    incInfo.put("longitud", c.getPosicion().getLongitud());
+                    incInfo.put("litrosMinimos", 3000);
+                    incInfo.put("prioridad", "CODIGO_ROJO");
+                    incInfo.put("estado", "ASIGNADO");
+                    incInfo.put("camionSugeridoId", c.getId());
+                    incInfo.put("fechaAsignacion", Instant.now().toString());
+
+                    incidentesAsignados.put(c.getId(), incInfo);
+                    incidentesAsignados.put(c.getIncidenteAsignadoId(), incInfo);
+                }
+            }
+        } catch (Exception e) {
+            // Silencioso si la BD aún está inicializando
+        }
+    }
+
     @Override
     public ReservaSaga reservarCamionOptimo(String incidenteId, String tipoFuego, double lat, double lon, int litrosMinimos) {
         return reservarCamionOptimo(incidenteId, tipoFuego, lat, lon, litrosMinimos, null, null, null);
